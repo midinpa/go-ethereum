@@ -1,0 +1,7 @@
+#!/bin/sh
+
+gethdir=$HOME/go-ethereum/build/bin
+datadir=$gethdir/data
+
+cd $gethdir
+./geth --datadir $datadir --rpc --rpcapi net,miner,admin,eth,web3,personal --rpccorsdomain "*"

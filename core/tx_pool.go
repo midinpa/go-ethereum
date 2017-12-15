@@ -62,6 +62,14 @@ var (
 	// is higher than the balance of the user's account.
 	ErrInsufficientFunds = errors.New("insufficient funds for gas * price + value")
 
+	// ErrInsufficientBalance is returned if the value
+	// is higher than the balance.
+	ErrInsufficientBalance = errors.New("insufficient Balance for value")
+
+	// ErrInsufficientValue is returned if the total cost of gas
+	// is higher than the value.
+	ErrInsufficientValue = errors.New("insufficient value for gas * price")
+
 	// ErrIntrinsicGas is returned if the transaction is specified to use less gas
 	// than required to start the invocation.
 	ErrIntrinsicGas = errors.New("intrinsic gas too low")
@@ -583,8 +591,17 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	}
 	// Transactor should have enough funds to cover the costs
 	// cost == V + GP * GL
-	if pool.currentState.GetBalance(from).Cmp(tx.Cost()) < 0 {
-		return ErrInsufficientFunds
+	if !tx.GasFromValue() {
+		if pool.currentState.GetBalance(from).Cmp(tx.Cost()) < 0 {
+			return ErrInsufficientFunds
+		}
+	} else {
+		if pool.currentState.GetBalance(from).Cmp(tx.Value()) < 0 {
+			return ErrInsufficientBalance
+		}
+		if tx.Value().Cmp(tx.GasCost()) < 0 {
+			return ErrInsufficientValue
+		}
 	}
 	intrGas := IntrinsicGas(tx.Data(), tx.To() == nil, pool.homestead)
 	if tx.Gas().Cmp(intrGas) < 0 {
@@ -653,7 +670,6 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (bool, error) {
 
 		// We've directly injected a replacement transaction, notify subsystems
 		go pool.txFeed.Send(TxPreEvent{tx})
-
 		return old != nil, nil
 	}
 	// New transaction isn't replacing a pending one, push into queue

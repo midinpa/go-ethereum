@@ -1,0 +1,8 @@
+#!/bin/sh
+
+gethdir=$HOME/go-ethereum/build/bin
+datadir=$gethdir/ropsten
+
+cd $gethdir
+
+./geth --datadir $datadir attach ipc:$datadir/geth.ipc

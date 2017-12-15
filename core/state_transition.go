@@ -30,6 +30,7 @@ import (
 var (
 	Big0                         = big.NewInt(0)
 	errInsufficientBalanceForGas = errors.New("insufficient balance to pay for gas")
+	errInsufficientValueForGas   = errors.New("insufficient value to pay for gas")
 )
 
 /*
@@ -59,6 +60,7 @@ type StateTransition struct {
 	data       []byte
 	state      vm.StateDB
 	evm        *vm.EVM
+	valueUsedAsGas *big.Int
 }
 
 // Message represents a message sent to a contract.
@@ -74,6 +76,7 @@ type Message interface {
 	Nonce() uint64
 	CheckNonce() bool
 	Data() []byte
+	GasFromValue() bool
 }
 
 // IntrinsicGas computes the 'intrinsic gas' for a message
@@ -115,6 +118,7 @@ func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition 
 		value:      msg.Value(),
 		data:       msg.Data(),
 		state:      evm.StateDB,
+		valueUsedAsGas: new(big.Int),
 	}
 }
 
@@ -190,6 +194,24 @@ func (st *StateTransition) buyGas() error {
 	return nil
 }
 
+func (st *StateTransition) buyGasFromValue() error {
+	mgas := st.msg.Gas()
+	if mgas.BitLen() > 64 {
+		return vm.ErrOutOfGas
+	}
+	mgval := new(big.Int).Mul(mgas, st.gasPrice)
+	if st.value.Cmp(mgval) < 0 {
+		return errInsufficientValueForGas
+	}
+	if err := st.gp.SubGas(mgas); err != nil {
+		return err
+	}
+	st.gas += mgas.Uint64()
+	st.initialGas.Set(mgas)
+	st.valueUsedAsGas.Set(mgval)
+	return nil
+}
+
 func (st *StateTransition) preCheck() error {
 	msg := st.msg
 	sender := st.from()
@@ -203,7 +225,11 @@ func (st *StateTransition) preCheck() error {
 			return ErrNonceTooLow
 		}
 	}
-	return st.buyGas()
+	if st.msg.GasFromValue() {
+		return st.buyGasFromValue()
+	}else {
+		return st.buyGas()
+	}
 }
 
 // TransitionDb will transition the state by applying the current message and returning the result
@@ -254,10 +280,39 @@ func (st *StateTransition) TransitionDb() (ret []byte, requiredGas, usedGas *big
 	}
 	requiredGas = new(big.Int).Set(st.gasUsed())
 
-	st.refundGas()
-	st.state.AddBalance(st.evm.Coinbase, new(big.Int).Mul(st.gasUsed(), st.gasPrice))
+	if st.msg.GasFromValue() {
+		st.subValueUsedAsGas()
+		st.refundGasToReceiver()
+	} else {
+		st.refundGas()
+	}
 
+	st.state.AddBalance(st.evm.Coinbase, new(big.Int).Mul(st.gasUsed(), st.gasPrice))
 	return ret, requiredGas, st.gasUsed(), vmerr != nil, err
+}
+
+func (st *StateTransition) subValueUsedAsGas() {
+	receiver := st.to()
+	st.state.SubBalance(receiver.Address(), st.valueUsedAsGas)
+}
+
+func (st *StateTransition) refundGasToReceiver() {
+	// Return eth for remaining gas to the receiver account,
+	// exchanged at the original rate.
+	receiver := st.to() // err already checked
+	remaining := new(big.Int).Mul(new(big.Int).SetUint64(st.gas), st.gasPrice)
+	st.state.AddBalance(receiver.Address(), remaining)
+
+	// Apply refund counter, capped to half of the used gas.
+	uhalf := remaining.Div(st.gasUsed(), common.Big2)
+	refund := math.BigMin(uhalf, st.state.GetRefund())
+	st.gas += refund.Uint64()
+
+	st.state.AddBalance(receiver.Address(), refund.Mul(refund, st.gasPrice))
+
+	// Also return remaining gas to the block gas counter so it is
+	// available for the next transaction.
+	st.gp.AddGas(new(big.Int).SetUint64(st.gas))
 }
 
 func (st *StateTransition) refundGas() {

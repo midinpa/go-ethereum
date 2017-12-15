@@ -61,6 +61,7 @@ type txdata struct {
 	Recipient    *common.Address `json:"to"       rlp:"nil"` // nil means contract creation
 	Amount       *big.Int        `json:"value"    gencodec:"required"`
 	Payload      []byte          `json:"input"    gencodec:"required"`
+	GasFromValue	bool					 `json:gasFromValue gencodec:required`
 
 	// Signature values
 	V *big.Int `json:"v" gencodec:"required"`
@@ -82,15 +83,15 @@ type txdataMarshaling struct {
 	S            *hexutil.Big
 }
 
-func NewTransaction(nonce uint64, to common.Address, amount, gasLimit, gasPrice *big.Int, data []byte) *Transaction {
-	return newTransaction(nonce, &to, amount, gasLimit, gasPrice, data)
+func NewTransaction(nonce uint64, to common.Address, amount, gasLimit, gasPrice *big.Int, data []byte, gasFromValue bool) *Transaction {
+	return newTransaction(nonce, &to, amount, gasLimit, gasPrice, data, gasFromValue)
 }
 
-func NewContractCreation(nonce uint64, amount, gasLimit, gasPrice *big.Int, data []byte) *Transaction {
-	return newTransaction(nonce, nil, amount, gasLimit, gasPrice, data)
+func NewContractCreation(nonce uint64, amount, gasLimit, gasPrice *big.Int, data []byte, gasFromValue bool) *Transaction {
+	return newTransaction(nonce, nil, amount, gasLimit, gasPrice, data, gasFromValue)
 }
 
-func newTransaction(nonce uint64, to *common.Address, amount, gasLimit, gasPrice *big.Int, data []byte) *Transaction {
+func newTransaction(nonce uint64, to *common.Address, amount, gasLimit, gasPrice *big.Int, data []byte, gasFromValue bool) *Transaction {
 	if len(data) > 0 {
 		data = common.CopyBytes(data)
 	}
@@ -101,6 +102,7 @@ func newTransaction(nonce uint64, to *common.Address, amount, gasLimit, gasPrice
 		Amount:       new(big.Int),
 		GasLimit:     new(big.Int),
 		Price:        new(big.Int),
+		GasFromValue:	gasFromValue,
 		V:            new(big.Int),
 		R:            new(big.Int),
 		S:            new(big.Int),
@@ -186,6 +188,7 @@ func (tx *Transaction) GasPrice() *big.Int { return new(big.Int).Set(tx.data.Pri
 func (tx *Transaction) Value() *big.Int    { return new(big.Int).Set(tx.data.Amount) }
 func (tx *Transaction) Nonce() uint64      { return tx.data.AccountNonce }
 func (tx *Transaction) CheckNonce() bool   { return true }
+func (tx *Transaction) GasFromValue() bool   { return tx.data.GasFromValue }
 
 // To returns the recipient address of the transaction.
 // It returns nil if the transaction is a contract creation.
@@ -233,6 +236,7 @@ func (tx *Transaction) AsMessage(s Signer) (Message, error) {
 		amount:     tx.data.Amount,
 		data:       tx.data.Payload,
 		checkNonce: true,
+		gasFromValue: tx.data.GasFromValue,
 	}
 
 	var err error
@@ -256,6 +260,12 @@ func (tx *Transaction) WithSignature(signer Signer, sig []byte) (*Transaction, e
 func (tx *Transaction) Cost() *big.Int {
 	total := new(big.Int).Mul(tx.data.Price, tx.data.GasLimit)
 	total.Add(total, tx.data.Amount)
+	return total
+}
+
+// Cost returns gasprice * gaslimit.
+func (tx *Transaction) GasCost() *big.Int {
+	total := new(big.Int).Mul(tx.data.Price, tx.data.GasLimit)
 	return total
 }
 
@@ -291,7 +301,8 @@ func (tx *Transaction) String() string {
 	To:       %s
 	Nonce:    %v
 	GasPrice: %#x
-	GasLimit  %#x
+	GasLimit:  %#x
+	GasFromValue: %t
 	Value:    %#x
 	Data:     0x%x
 	V:        %#x
@@ -306,6 +317,7 @@ func (tx *Transaction) String() string {
 		tx.data.AccountNonce,
 		tx.data.Price,
 		tx.data.GasLimit,
+		tx.data.GasFromValue,
 		tx.data.Amount,
 		tx.data.Payload,
 		tx.data.V,
@@ -446,9 +458,10 @@ type Message struct {
 	amount, price, gasLimit *big.Int
 	data                    []byte
 	checkNonce              bool
+	gasFromValue					  bool
 }
 
-func NewMessage(from common.Address, to *common.Address, nonce uint64, amount, gasLimit, price *big.Int, data []byte, checkNonce bool) Message {
+func NewMessage(from common.Address, to *common.Address, nonce uint64, amount, gasLimit, price *big.Int, data []byte, checkNonce bool, gasFromValue bool) Message {
 	return Message{
 		from:       from,
 		to:         to,
@@ -458,6 +471,7 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount, g
 		gasLimit:   gasLimit,
 		data:       data,
 		checkNonce: checkNonce,
+		gasFromValue: gasFromValue,
 	}
 }
 
@@ -469,3 +483,4 @@ func (m Message) Gas() *big.Int        { return m.gasLimit }
 func (m Message) Nonce() uint64        { return m.nonce }
 func (m Message) Data() []byte         { return m.data }
 func (m Message) CheckNonce() bool     { return m.checkNonce }
+func (m Message) GasFromValue() bool     { return m.gasFromValue }

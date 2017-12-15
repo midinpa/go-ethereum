@@ -1,0 +1,8 @@
+#!/bin/sh
+
+gethdir=$HOME/go-ethereum/build/bin
+datadir=$gethdir/data
+
+cd $gethdir
+
+./geth attach --datadir $datadir ipc:$datadir/geth.ipc

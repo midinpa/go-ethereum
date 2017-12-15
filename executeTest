@@ -1,0 +1,13 @@
+#!/bin/sh
+
+gethdir=$HOME/go-ethereum/build/bin
+datadir=$gethdir/data/test
+
+cd $gethdir
+./geth \
+--dev \
+--datadir $datadir \
+--rpc \
+--rpcapi="web3,eth,net" \
+#--rpcaddr="192.168.1.133" \
+# --rpccorsdomain "192.168.1.210"
